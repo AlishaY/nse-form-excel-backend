@@ -6,18 +6,14 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
 	"net/http"
-	// "errors"
-	// "os"
 	"strings"
-	// "path/filepath"
 	_ "github.com/denisenkom/go-mssqldb" // SQL Server driver
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
-	// "golang.org/x/net/context"
-	// "google.golang.org/api/googleapi"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -33,6 +29,16 @@ type Job struct {
 var db *sql.DB
 
 func main() {
+	var err error
+	db, err = sql.Open(
+		"sqlserver",
+		"sqlserver://coadmin:alisha@1234@localhost?database=TODO&connection+timeout=30",
+	)
+	if err != nil {
+		log.Fatalf("Failed to connect to the database: %v", err)
+	}
+	defer db.Close()
+
 	router := gin.Default()
 
 	// Enable CORS
@@ -40,7 +46,7 @@ func main() {
 
 	// Define the API endpoints
 	router.GET("/joborder/:jobNo", getJob)
-	router.POST("/joborder/storeIssues", writeIssue)
+	// router.POST("/joborder/storeIssues", writeIssue)
 	router.POST("/joborder/write", writeDataHandler)
 
 	// Start the server
@@ -61,22 +67,44 @@ func writeDataHandler(c *gin.Context) {
 		return
 	}
 
-	// Specify the spreadsheet ID and range
-	spreadsheetID := "1IKRI_CasrSyOCPbyhsDKQmE0tJGTlNbP0tVRF9FHPEQ"
-	rangeValue := "sample1!A1:B3"
-
-	// Create the value range to write
-	values := [][]interface{}{
-		{"Value A1", "Value B1"},
-		{"Value A2", "Value B2"},
-		{"Value A2", "Value B2"},
+	// Parse the request body to get the data
+	var data struct {
+		JobDate				string `json:"jobDate"`
+		ReferenceNo			string `json:"referenceNo"`
+		CustomerName		string `json:"customerName"`
+		DeliveryLocName		string `json:"deliveryLocName"`
+		Remarks             string `json:"remarks"`
+		SelectedHappened    string `json:"selectedHappened"`
+		SelectedIssue       string `json:"selectedIssue"`
+		SelectedSettlement  string `json:"selectedSettlement"`
+		SettlementDate  	string `json:"settlementDate"`
+		TruckNo  			string `json:"truckNo"`
 	}
+	if err := c.ShouldBindJSON(&data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request body",
+		})
+		return
+	}
+
+	// Split the SettlementDate string at the "T" delimiter
+	dateTimeParts := strings.Split(data.SettlementDate, "T")
+
+	// Extract the date portion (index 0) from the resulting slice
+	date := dateTimeParts[0]
+
+	values := [][]interface{}{
+		{data.JobDate, data.ReferenceNo, data.CustomerName, data.DeliveryLocName, data.Remarks, data.SelectedHappened, data.SelectedIssue, data.SelectedSettlement, date, data.TruckNo},
+	}
+
+	spreadsheetID := "1IKRI_CasrSyOCPbyhsDKQmE0tJGTlNbP0tVRF9FHPEQ"
+	rangeValue := "Sheet1!A1:J2"
 	valueRange := &sheets.ValueRange{
 		Values: values,
 	}
 
 	// Write the values to the spreadsheet
-	_, err = srv.Spreadsheets.Values.Update(spreadsheetID, rangeValue, valueRange).ValueInputOption("USER_ENTERED").Do()
+	_, err = srv.Spreadsheets.Values.Append(spreadsheetID, rangeValue, valueRange).ValueInputOption("USER_ENTERED").Do()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to write data to spreadsheet" + err.Error(),
@@ -92,11 +120,6 @@ func writeDataHandler(c *gin.Context) {
 
 func writeIssue(c *gin.Context) {
 	ctx := context.Background()
-
-	// service, err := getServiceClient(ctx)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
 
 	cl, err := getClient(ctx)
         if err != nil {
@@ -128,41 +151,6 @@ func writeIssue(c *gin.Context) {
 	}
 
 	fmt.Printf("Updated %d cells.\n", resp.Updates.UpdatedCells)
-}
-
-func getServiceClient(ctx context.Context) (*sheets.Service, error) {
-	credentialsFile := "credentials.json" // Update the filename to match your credentials file
-
-	// Read the credentials file
-	credentials, err := ioutil.ReadFile(credentialsFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read credentials file: %v", err)
-	}
-
-	// Create a Config object from the credentials file
-	config, err := google.ConfigFromJSON(credentials, sheets.SpreadsheetsScope)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse credentials: %v", err)
-	}
-
-	token := &oauth2.Token{
-		// If you have an access token saved in the token.json file, you can assign it here
-		AccessToken: "ya29.a0AWY7CklmInTipDPAw3f8S1wzhBHjd0CkTzNH5rVp7Fc6d6CEWMdGbdrsJjRoB29c1lTt_BmpGF8UyiHSPAlGWzAlo-Ndfc_6utC4BRjGsorW8HYznAD_b16jPNetKtS3ijyR39H_xanEeUFqjjqq8ZvIL426aCgYKAd8SARISFQG1tDrpPppg6SjW_qI8xH9-5M7HiQ0163",
-	}
-
-	// Obtain a token source from the Config
-	tokenSource := config.TokenSource(ctx, token)
-
-	// Create a new HTTP client using the token source
-	client := oauth2.NewClient(ctx, tokenSource)
-
-	// Create a new Google Sheets service client
-	service, err := sheets.New(client)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Sheets client: %v", err)
-	}
-
-	return service, nil
 }
 
 func getClient(ctx context.Context) (*http.Client, error) {
@@ -205,7 +193,16 @@ func getJob(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan row"})
 			return
 		}
-		job.JobDate = strings.TrimSpace(job.JobDate[:10]) // Slice to get the first 10 characters (date portion)
+		// job.JobDate = strings.TrimSpace(job.JobDate[:10]) // Slice to get the first 10 characters (date portion)
+		parsedTime, err := time.Parse(time.RFC3339, job.JobDate)
+		if err != nil {
+			fmt.Println("Failed to parse date:", err)
+			return
+		}
+		fmt.Println("parsedTime HERE", parsedTime)
+		job.JobDate = parsedTime.Format("2006-01-02")
+		fmt.Println("job dATE HERE", job.JobDate)
+
 		jobs = append(jobs, job)
 	}
 	fmt.Println("end")
