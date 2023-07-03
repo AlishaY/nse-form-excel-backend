@@ -19,25 +19,30 @@ import (
 )
 //json uri redirect: http://localhost:8080/callback
 type Job struct {
+	JobNo         	string `json:"jobNo"`
 	JobDate         string `json:"jobDate"`
 	ReferenceNo     string `json:"referenceNo"`
 	CustomerName    string `json:"customerName"`
 	DeliveryLocName string `json:"deliveryLocName"`
+	DeliveryPointName string `json:"deliveryPointName"`
 	TruckNo         string `json:"truckNo"`
 }
-
+//103.230.124.241
 var db *sql.DB
 
 func main() {
 	var err error
 	db, err = sql.Open(
 		"sqlserver",
-		"sqlserver://coadmin:alisha@1234@localhost?database=TODO&connection+timeout=30",
+		// "sqlserver://coadmin:alisha@1234@localhost?database=TODO&connection+timeout=30",
+		"sqlserver://coadmin:tms@1234@103.230.124.241:1433?database=CoTMS&connection+timeout=30",
 	)
 	if err != nil {
 		log.Fatalf("Failed to connect to the database: %v", err)
 	}
 	defer db.Close()
+
+	fmt.Println("Database connection successful")
 
 	router := gin.Default()
 
@@ -69,13 +74,17 @@ func writeDataHandler(c *gin.Context) {
 
 	// Parse the request body to get the data
 	var data struct {
+		Timestamp  			string `json:"timestamp"`
+		Email				string `json:"email"`
+		SelectedIssue       string `json:"selectedIssue"`
+		SelectedHappened    string `json:"selectedHappened"`
 		JobDate				string `json:"jobDate"`
+		JobNo				string `json:"jobNo"`
 		ReferenceNo			string `json:"referenceNo"`
 		CustomerName		string `json:"customerName"`
+		DeliveryPointName	string `json:"DeliveryPointName"`
 		DeliveryLocName		string `json:"deliveryLocName"`
 		Remarks             string `json:"remarks"`
-		SelectedHappened    string `json:"selectedHappened"`
-		SelectedIssue       string `json:"selectedIssue"`
 		SelectedSettlement  string `json:"selectedSettlement"`
 		SettlementDate  	string `json:"settlementDate"`
 		TruckNo  			string `json:"truckNo"`
@@ -87,6 +96,14 @@ func writeDataHandler(c *gin.Context) {
 		return
 	}
 
+	now := time.Now();
+	currDate := now.Format("2006-01-02");
+	currTime := now.Format("15:04:05");
+	data.Timestamp = currDate + " " + currTime;
+	fmt.Println("the timestamp", data.Timestamp)
+	fmt.Println("the date", currDate)
+	fmt.Println("the now", now)
+
 	// Split the SettlementDate string at the "T" delimiter
 	dateTimeParts := strings.Split(data.SettlementDate, "T")
 
@@ -94,7 +111,7 @@ func writeDataHandler(c *gin.Context) {
 	date := dateTimeParts[0]
 
 	values := [][]interface{}{
-		{data.JobDate, data.ReferenceNo, data.CustomerName, data.DeliveryLocName, data.Remarks, data.SelectedHappened, data.SelectedIssue, data.SelectedSettlement, date, data.TruckNo},
+		{data.Timestamp, data.Email, data.SelectedIssue, data.SelectedHappened, data.JobNo, data.JobDate, data.ReferenceNo, data.CustomerName, data.DeliveryPointName, data.DeliveryLocName, data.TruckNo, data.SelectedSettlement, date, data.Remarks, },
 	}
 
 	spreadsheetID := "1IKRI_CasrSyOCPbyhsDKQmE0tJGTlNbP0tVRF9FHPEQ"
@@ -176,9 +193,10 @@ func getClient(ctx context.Context) (*http.Client, error) {
 func getJob(c *gin.Context) {
 	fmt.Println("first line in getJob")
 	jobNo := c.Param("jobNo")
-	rows, err := db.Query("SELECT JobDate, ReferenceNo, CustomerName, DeliveryLocName, TruckNo FROM JobOrder WHERE JobNo=@JobNo", sql.Named("JobNo", jobNo))
+	rows, err := db.Query("SELECT JobDate, JobNo, ReferenceNo, CustomerName, DeliveryLocName, DeliveryPointName, TruckNo FROM JobOrder WHERE JobNo=@JobNo", sql.Named("JobNo", jobNo))
 	if err != nil {
 		fmt.Println("this is error")
+		fmt.Println(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get Jobs"})
 		return
 	}
@@ -188,7 +206,7 @@ func getJob(c *gin.Context) {
 	jobs := []Job{}
 	for rows.Next() {
 		var job Job
-		err := rows.Scan(&job.JobDate, &job.ReferenceNo, &job.CustomerName, &job.DeliveryLocName, &job.TruckNo)
+		err := rows.Scan(&job.JobDate, &job.JobNo, &job.ReferenceNo, &job.CustomerName, &job.DeliveryLocName, &job.DeliveryPointName, &job.TruckNo)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan row"})
 			return
